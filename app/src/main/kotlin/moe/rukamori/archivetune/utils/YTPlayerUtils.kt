@@ -33,6 +33,7 @@ import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.TVHTML5
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.VISIONOS
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_CREATOR
+import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_EMBEDDED
 import moe.rukamori.archivetune.innertube.models.YouTubeClient.Companion.WEB_REMIX
 import moe.rukamori.archivetune.innertube.models.response.PlayerResponse
 import moe.rukamori.archivetune.utils.potoken.BotGuardTokenGenerator
@@ -155,6 +156,9 @@ object YTPlayerUtils {
             VISIONOS,
             TVHTML5,
             TVHTML5_SIMPLY_EMBEDDED_PLAYER,
+            // Embedded players can bypass age verification ("Sign in to confirm your age")
+            // by sending an embed context, and they work for anonymous playback.
+            WEB_EMBEDDED,
             WEB,
             WEB_CREATOR,
             WEB_REMIX,
@@ -749,7 +753,10 @@ object YTPlayerUtils {
                 )}",
             )
 
-            if (client != MAIN_CLIENT && client.loginRequired && !canUseLoggedInPlayback) {
+            // Embedded clients (e.g. TVHTML5_SIMPLY_EMBEDDED_PLAYER, WEB_EMBEDDED) authenticate
+            // through the embed context instead of a login cookie, so they can play age-restricted
+            // / explicit content anonymously. Do not skip them when there is no login context.
+            if (client != MAIN_CLIENT && client.loginRequired && !client.isEmbedded && !canUseLoggedInPlayback) {
                 Timber.tag(logTag).i("Skipping client ${describeClient(client)} - requires login but auth mode is ${authMode()}")
                 continue
             }
