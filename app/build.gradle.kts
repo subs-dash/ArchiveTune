@@ -33,7 +33,7 @@ android {
     applicationId = "moe.rukamori.archivetune"
         minSdk = 26
         targetSdk = 37
-        versionCode = 136
+        versionCode = 136 + (System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 0)
         versionName = "13.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -153,6 +153,8 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable = true
+            // Visible version tag on every debug APK, e.g. "13.5.0-agefix.7".
+            versionNameSuffix = "-agefix." + (System.getenv("BUILD_NUMBER") ?: "local")
         }
     }
 

@@ -1,12 +1,14 @@
 name: Build Debug APK (age-restricted playback fix)
 
-# Minimal, secret-free debug build used to test the age-restricted /
-# explicit-content playback fix in YTPlayerUtils.kt.
+# Minimal, secret-free debug build for testing.
 #
-# - No signing secrets: the debug build type uses Gradle's auto-generated
-#   debug keystore, and missing API keys fall back to empty strings.
-# - Builds a single variant: gms + mobile + arm64 + Debug
-#   -> Gradle task `assembleGmsMobileArm64Debug`.
+# - Stable signature: the debug keystore is cached across runs (actions/cache),
+#   so every APK is signed with the SAME key -> you can update in place
+#   instead of getting "package conflicts with an existing package".
+# - Versioned: each build gets a unique, increasing versionCode and a visible
+#   versionName suffix (e.g. 13.5.0-agefix.7), and the APK/Release are named
+#   with that version.
+# - gms + mobile + arm64 + Debug -> Gradle task assembleGmsMobileArm64Debug.
 # - Installs alongside the official app (applicationId suffix `.debug`).
 
 on:
@@ -42,6 +44,36 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          VNAME="13.5.0-agefix.${GITHUB_RUN_NUMBER}"
+          echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VNAME}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VNAME} (versionCode $((136 + GITHUB_RUN_NUMBER)))"
+
+      # Persist a single debug keystore across runs so the APK signature is
+      # stable -> in-place updates work without uninstalling.
+      - name: Restore stable debug keystore
+        id: keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: archivetune-debug-keystore-v1
+
+      - name: Generate debug keystore (first run only)
+        if: steps.keystore.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
@@ -50,39 +82,42 @@ jobs:
         env:
           PULL_REQUEST: 'false'
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BUILD_NUMBER: ${{ steps.ver.outputs.build_number }}
 
-      - name: Locate APK
+      - name: Locate & rename APK
         id: apk
         shell: bash
         run: |
           set -euo pipefail
-          APK_PATH="$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
-          if [ -z "$APK_PATH" ]; then
+          SRC="$(find app/build/outputs/apk -type f -name '*.apk' | head -n 1)"
+          if [ -z "$SRC" ]; then
             echo "No APK produced" >&2
             find app/build/outputs/apk -type f || true
             exit 1
           fi
-          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
-          echo "Found APK: $APK_PATH"
+          OUT="ArchiveTune-${{ steps.ver.outputs.version_name }}-gms-mobile-arm64-debug.apk"
+          cp "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "Built: $OUT (from $SRC)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: archivetune-gms-mobile-arm64-debug
+          name: ArchiveTune-${{ steps.ver.outputs.version_name }}-gms-mobile-arm64-debug
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: debug-age-fix-${{ github.run_number }}
-          name: Debug build (age-restricted playback fix) #${{ github.run_number }}
+          tag_name: v${{ steps.ver.outputs.version_name }}
+          name: ArchiveTune ${{ steps.ver.outputs.version_name }} (debug)
           body: |
-            Debug APK (gms / mobile / arm64) built to test the age-restricted /
-            explicit-content playback fix in `YTPlayerUtils.kt`.
+            Debug APK (gms / mobile / arm64), version **${{ steps.ver.outputs.version_name }}**.
 
-            Installs alongside the official app (applicationId suffix `.debug`).
+            - Signed with a stable debug key, so you can install over previous
+              `agefix` debug builds without uninstalling.
+            - Installs alongside the official app (applicationId suffix `.debug`).
           files: ${{ steps.apk.outputs.path }}
           draft: false
           prerelease: true
